@@ -43,3 +43,29 @@ class LinearProjection(nn.Module):
         if self._use_bias:
             _out = torch.add(_out, self.bias)
         return _out
+
+
+class PositionalEncodings:
+    def __init__(self, out_dimension, device):
+        self.out_dimension = out_dimension
+
+        # generate positional encodings
+        pos_vector = np.arange(0, out_dimension, 1)
+        embeddings = np.zeros([out_dimension, out_dimension], dtype=np.float32)
+        for i in range(out_dimension // 2):
+            denom = 10000 ** (2 * i / out_dimension)
+            embeddings[:, 2 * i] = np.sin(pos_vector / denom)
+            embeddings[:, 2 * i + 1] = np.cos(pos_vector / denom)
+        self.embeddings = torch.from_numpy(embeddings).to(device)
+
+    def get_positional_encodings(self, sequence_lengths):
+        """
+        :param sequence_lengths: list of integers that represents len of sequences for the whole batch
+        :return: list of torch.Tensor
+        """
+        out = []
+        for sequence_length in sequence_lengths:
+            out.append(
+                self.embeddings[:sequence_length, :]
+            )
+        return out
