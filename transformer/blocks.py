@@ -76,6 +76,32 @@ class ReuseLinearProjection(LinearProjection):
         return _out
 
 
+class PositionWiseFeedForward(nn.Module):
+    def __init__(self, in_dim, mid_dim, out_dim, weights_initialization="he",
+                 bias_initialization="zeros"):
+        super().__init__()
+        self.layer1 = LinearProjection(
+            in_dim,
+            mid_dim,
+            weights_initialization=weights_initialization,
+            bias_initialization=bias_initialization,
+            use_bias=True
+        )
+        self.layer2 = LinearProjection(
+            mid_dim,
+            out_dim,
+            weights_initialization=weights_initialization,
+            bias_initialization=bias_initialization,
+            use_bias=True
+        )
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        _out = self.layer1(x)
+        _out = self.relu(_out)
+        return self.layer2(_out)
+
+
 class PositionalEncodings:
     def __init__(self, out_dimension, device):
         self.out_dimension = out_dimension
