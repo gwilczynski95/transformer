@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 
-class LinearProjection(nn.Module):
+class LinearLayer(nn.Module):
     def __init__(self, in_dimension, out_dimension, weights_initialization="he", bias_initialization="zeros",
                  use_bias=True, scaling_factor=1, freeze=False):
         super().__init__()
@@ -49,7 +49,7 @@ class LinearProjection(nn.Module):
         return _out
 
 
-class ReuseLinearProjection(LinearProjection):
+class ReuseLinearLayer(LinearLayer):
     def __init__(self, layer, scaling_factor=1, transpose=False):
         if transpose and layer.use_bias:
             raise ValueError("Cannot set transpose flag while using bias from another layer")
@@ -80,14 +80,14 @@ class PositionWiseFeedForward(nn.Module):
     def __init__(self, in_dim, mid_dim, out_dim, weights_initialization="he",
                  bias_initialization="zeros"):
         super().__init__()
-        self.layer1 = LinearProjection(
+        self.layer1 = LinearLayer(
             in_dim,
             mid_dim,
             weights_initialization=weights_initialization,
             bias_initialization=bias_initialization,
             use_bias=True
         )
-        self.layer2 = LinearProjection(
+        self.layer2 = LinearLayer(
             mid_dim,
             out_dim,
             weights_initialization=weights_initialization,
@@ -100,6 +100,47 @@ class PositionWiseFeedForward(nn.Module):
         _out = self.layer1(x)
         _out = self.relu(_out)
         return self.layer2(_out)
+
+
+class ScaledDotProductAttention(nn.Module):  # todo: test this
+    def __init__(self, inp_dim, keys_dim, values_dim, weights_initialization="he"):
+        super().__init__()
+
+        self.keys_dim = keys_dim
+
+        self.layer_Q = LinearLayer(
+            inp_dim,
+            keys_dim,
+            weights_initialization=weights_initialization,
+            use_bias=False
+        )
+        self.layer_K = LinearLayer(
+            inp_dim,
+            keys_dim,
+            weights_initialization=weights_initialization,
+            use_bias=False
+        )
+        self.layer_V = LinearLayer(
+            inp_dim,
+            values_dim,
+            weights_initialization=weights_initialization,
+            use_bias=False
+        )
+        self.softmax = nn.Softmax()
+
+    def forward(self, x):
+        # inp [batch_size, num_of_tokens, inp_dim]
+        out = []  # todo: don't know if this is ok
+        for batch_idx in x.shape[0]:
+            Q = self.layer_Q(x[batch_idx, :, :])
+            K = self.layer_K(x[batch_idx, :, :])
+            V = self.layer_V(x[batch_idx, :, :])
+            soft_out = self.softmax(
+                torch.matmul(Q, K.T) / torch.sqrt(self.keys_dim)
+            )
+            tokens = torch.matmul(soft_out, V)
+            out.append(tokens)
+        return out
 
 
 class PositionalEncodings:
