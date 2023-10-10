@@ -13,12 +13,14 @@ class LinearProjection(nn.Module):
         self._use_bias = use_bias
 
         # initialize weights
-        assert weights_initialization in ["he", "glorot", "ones"]
+        assert weights_initialization in ["he", "glorot", "normal", "ones"]
         if weights_initialization == "glorot":
             fan_avg = (self.in_dimension + self.out_dimension) / 2
             std = np.sqrt(1 / fan_avg)
         elif weights_initialization == "he":
             std = np.sqrt(2 / in_dimension)
+        elif weights_initialization == "normal":
+            std = 1
         weights = np.random.normal(0, std, [in_dimension, out_dimension]).astype(np.float32)
         if weights_initialization == "ones":
             weights = np.ones([in_dimension, out_dimension], dtype=np.float32)
