@@ -128,7 +128,7 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
         )
         self.softmax = nn.Softmax()
 
-    def forward(self, x):
+    def forward(self, x):  # todo: do this vectorized, data will be made into buckets
         # inp [batch_size, num_of_tokens, inp_dim]
         out = []  # todo: don't know if this is ok
         for batch_idx in x.shape[0]:
@@ -140,6 +140,58 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
             )
             tokens = torch.matmul(soft_out, V)
             out.append(tokens)
+        return torch.cat(out, dim=0)
+
+    # def forward1(self, x):
+    #     Q = self.layer_Q(x)  # linear should work like a time distributed but not sure
+    #     K = self.layer_K(x)
+    #     V = self.layer_V(x)
+    #     out = []
+    #     for batch_idx in x.shape[0]:
+    #         key_query = torch.matmul(
+    #             Q[batch_idx], K[batch_idx].T
+    #         )
+    #         soft_out = self.softmax(
+    #             key_query / torch.sqrt(self.keys_dim)
+    #         )
+    #         tokens = torch.matmul(
+    #             soft_out,
+    #             V[batch_idx]
+    #         )
+    #         out.append(tokens)
+    #     return torch.cat(out, dim=0)
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, num_attention_heads, model_dim, position_wise_dim, weights_initialization="he"):
+        super().__init__()
+        assert num_attention_heads in [1, 2, 4, 8]
+        self.num_attention_heads = num_attention_heads
+        self.model_dim = model_dim
+        self.position_wise_dim = position_wise_dim
+        self.head_dim = model_dim // num_attention_heads
+
+        self.linear = LinearLayer(
+            model_dim, model_dim, weights_initialization=weights_initialization, use_bias=False
+        )
+
+        attention_heads = []
+        for head_idx in range(num_attention_heads):
+            attention_heads.append(
+                ScaledDotProductAttention(
+                    self.head_dim, self.head_dim, self.head_dim, weights_initialization
+                )
+            )
+        self.attention_heads = nn.ModuleList(attention_heads)
+
+    def forward(self, x):
+        attention_out = []
+        for head_idx, attention_head in enumerate(self.attention_heads):  # todo: do it in parallel
+            attention_out.append(
+                attention_head(x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)])
+            )
+        attention_out = torch.cat(attention_out, dim=2)
+        out = self.linear(attention_out)  # todo: this probably won't work\
         return out
 
 
