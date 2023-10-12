@@ -128,13 +128,13 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
         )
         self.softmax = nn.Softmax()
 
-    def forward(self, x):  # todo: do this vectorized, data will be made into buckets
+    def forward(self, query, key, value):  # todo: do this vectorized, data will be made into buckets
         # inp [batch_size, num_of_tokens, inp_dim]
         out = []  # todo: don't know if this is ok
-        for batch_idx in x.shape[0]:
-            Q = self.layer_Q(x[batch_idx, :, :])
-            K = self.layer_K(x[batch_idx, :, :])
-            V = self.layer_V(x[batch_idx, :, :])
+        for batch_idx in query.shape[0]:
+            Q = self.layer_Q(query[batch_idx, :, :])
+            K = self.layer_K(key[batch_idx, :, :])
+            V = self.layer_V(value[batch_idx, :, :])
             soft_out = self.softmax(
                 torch.matmul(Q, K.T) / torch.sqrt(self.keys_dim)
             )
@@ -188,10 +188,33 @@ class MultiHeadAttention(nn.Module):
         attention_out = []
         for head_idx, attention_head in enumerate(self.attention_heads):  # todo: do it in parallel
             attention_out.append(
-                attention_head(x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)])
+                attention_head(
+                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
+                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
+                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)]
+                )
             )
         attention_out = torch.cat(attention_out, dim=2)
         out = self.linear(attention_out)  # todo: this probably won't work\
+        return out
+
+
+class DecoderMultiHeadAttention(MultiHeadAttention):
+    def __init__(self, num_attention_heads, model_dim, position_wise_dim, weights_initialization="he"):
+        super().__init__(num_attention_heads, model_dim, position_wise_dim, weights_initialization)
+
+    def forward(self, x, keys, values):
+        attention_out = []
+        for head_idx, attention_head in enumerate(self.attention_heads):
+            attention_out.append(
+                attention_head(
+                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
+                    keys[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
+                    values[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)]
+                )
+            )
+        attention_out = torch.cat(attention_out, dim=2)
+        out = self.linear(attention_out)
         return out
 
 
@@ -209,6 +232,8 @@ class MaskedMultiHeadAttention(MultiHeadAttention):
             # create mask
             attention_out.append(
                 attention_head(
+                    inp[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
+                    inp[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
                     inp[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)]
                 )
             )
