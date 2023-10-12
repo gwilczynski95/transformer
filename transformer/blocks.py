@@ -195,6 +195,28 @@ class MultiHeadAttention(nn.Module):
         return out
 
 
+class MaskedMultiHeadAttention(MultiHeadAttention):
+    def __init__(self, num_attention_heads, model_dim, position_wise_dim, weights_initialization="he"):
+        super().__init__(num_attention_heads, model_dim, position_wise_dim, weights_initialization)
+
+    def forward(self, x, timesteps):
+        attention_out = []  # todo: test masking
+        mask = torch.ones(x.shape)
+        for batch_idx in range(x.shape[0]):
+            mask[batch_idx, timesteps[batch_idx] + 1:, :] = torch.Tensor(float("-inf"))
+        inp = x * mask
+        for head_idx, attention_head in enumerate(self.attention_heads):
+            # create mask
+            attention_out.append(
+                attention_head(
+                    inp[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)]
+                )
+            )
+        attention_out = torch.cat(attention_out, dim=2)
+        out = self.linear(attention_out)
+        return out
+
+
 class PositionalEncodings:
     def __init__(self, out_dimension, device):
         self.out_dimension = out_dimension
