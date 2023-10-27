@@ -9,3 +9,7 @@ It's task will be, of course, the translation task.
 
 If you feel this README lacks something - let me know, I'll fix this. Or if you have any idea on how to improve this
 project, once again, let me know 😊.
+
+#### My notes
+
+[Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/)
