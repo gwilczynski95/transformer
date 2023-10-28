@@ -106,7 +106,7 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
     def __init__(self, inp_dim, keys_dim, values_dim, weights_initialization="he"):
         super().__init__()
 
-        self.keys_dim = keys_dim
+        self.keys_dim = torch.tensor(keys_dim)
 
         self.layer_Q = LinearLayer(
             inp_dim,
@@ -128,38 +128,51 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
         )
         self.softmax = nn.Softmax()
 
-    def forward(self, query, key, value):  # todo: do this vectorized, data will be made into buckets
+    def forward(self, query, key, value):
         # inp [batch_size, num_of_tokens, inp_dim]
-        out = []  # todo: don't know if this is ok
-        for batch_idx in query.shape[0]:
+        Q = self.layer_Q(query)
+        K = self.layer_K(key)
+        V = self.layer_V(value)
+        _big_mul = torch.bmm(Q, torch.transpose(K, 2, 1))
+        _big_mul_scaled = _big_mul / torch.sqrt(self.keys_dim)
+        _big_mul_softed = nn.functional.softmax(_big_mul_scaled, dim=-1)  # todo: this softmax works as intended?
+        _big_tokens = torch.bmm(_big_mul_softed, V)
+        return _big_tokens
+
+    def legacy_forward(self, query, key, value):
+        # inp [batch_size, num_of_tokens, inp_dim]
+        out = []
+        big_Q = self.layer_Q(query)
+        big_K = self.layer_K(key)
+        big_V = self.layer_V(value)
+
+        _big_mul = torch.bmm(big_Q, torch.transpose(big_K, 2, 1))
+        _big_mul_scaled = _big_mul / torch.sqrt(self.keys_dim)
+        _big_mul_softed = nn.functional.softmax(_big_mul_scaled, dim=-1)
+        _big_tokens = torch.bmm(_big_mul_softed, big_V)
+
+        for batch_idx in range(query.shape[0]):
             Q = self.layer_Q(query[batch_idx, :, :])
             K = self.layer_K(key[batch_idx, :, :])
             V = self.layer_V(value[batch_idx, :, :])
-            soft_out = self.softmax(
-                torch.matmul(Q, K.T) / torch.sqrt(self.keys_dim)
-            )
-            tokens = torch.matmul(soft_out, V)
-            out.append(tokens)
-        return torch.cat(out, dim=0)
 
-    # def forward1(self, x):
-    #     Q = self.layer_Q(x)  # linear should work like a time distributed but not sure
-    #     K = self.layer_K(x)
-    #     V = self.layer_V(x)
-    #     out = []
-    #     for batch_idx in x.shape[0]:
-    #         key_query = torch.matmul(
-    #             Q[batch_idx], K[batch_idx].T
-    #         )
-    #         soft_out = self.softmax(
-    #             key_query / torch.sqrt(self.keys_dim)
-    #         )
-    #         tokens = torch.matmul(
-    #             soft_out,
-    #             V[batch_idx]
-    #         )
-    #         out.append(tokens)
-    #     return torch.cat(out, dim=0)
+            assert torch.min(Q == big_Q[batch_idx]).item()
+            assert torch.min(K == big_K[batch_idx]).item()
+            assert torch.min(V == big_V[batch_idx]).item()
+
+            _mul = torch.matmul(Q, K.T)
+            assert torch.min(_mul == _big_mul[batch_idx]).item()
+            _mul_scaled = _mul / torch.sqrt(self.keys_dim)
+            assert torch.min(_mul_scaled == _big_mul_scaled[batch_idx]).item()
+            _mul_softed = nn.functional.softmax(_mul_scaled, dim=-1)
+            assert torch.min(_mul_softed == _big_mul_softed[batch_idx]).item()
+            tokens = torch.matmul(_mul_softed, V)
+            assert torch.min(tokens == _big_tokens[batch_idx]).item()
+
+            out.append(tokens[None, :, :])
+        out = torch.cat(out, dim=0)
+        assert torch.min(out == _big_tokens).item()
+        return _big_tokens
 
 
 class MultiHeadAttention(nn.Module):
@@ -266,3 +279,23 @@ class PositionalEncodings:
                 self.embeddings[:sequence_length, :]
             )
         return out
+
+
+class LayerNormalization(nn.Module):
+    def __init__(self, model_dim):
+        super().__init__()
+        self.model_dim = model_dim
+
+        # todo: change to rand?
+        self.gamma = nn.Parameter(torch.ones(self.model_dim, dtype=torch.float32))
+        self.beta = nn.Parameter(torch.zeros(self.model_dim, dtype=torch.float32))
+
+    def forward(self, x):
+        # [BS, NUM_OF_SEQ, MODEL_DIM]
+        # mean.shape = [bs, num_of_seq]
+        mean = torch.mean(x, -1)
+        # std.shape = [bs, num_of_seq]
+        std = torch.std(x, -1)
+        norm_x = (x - mean[:, :, None]) / std[:, :, None]  # expanding dims to enable proper broadcast
+        out_x = self.gamma * norm_x + self.beta
+        return out_x
