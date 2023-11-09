@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from torch import nn
+from torch.nn.utils.rnn import pad_sequence
 
 
 class LinearLayer(nn.Module):
@@ -355,5 +356,59 @@ class EncoderBlock(nn.Module):
         return x
 
 
-# class Encoder(nn.Module)
+class Encoder(nn.Module):
+    def __init__(self, embedding_layer, encoder_blocks=6, model_dim=512, attention_heads=8, pwff_mid_dim=2048,
+                 dropout_rate=0.1, device=None):
+        """
+        Encoder for the Transformer model
+        :param embedding_layer: Embedding layer
+        :param encoder_blocks: Number of encoder blocks
+        :param model_dim: Dimension of the embeddings and tokens
+        :param attention_heads: Number of attention heads
+        :param pwff_mid_dim: Dimension of the middle layer of Position-Wise Feed Forward layer
+        :param dropout_rate: Dropout rate
+        :param device: Torch device
+        """
+        super().__init__()
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = device
+        self.embed_layer = embedding_layer
+        self.model_dim = model_dim
+        self.attention_heads = attention_heads
+        self.pwff_mid_dim = pwff_mid_dim
+        self.dropout_rate = dropout_rate
 
+        self.enc_blocks = []
+        for _ in range(encoder_blocks):
+            self.enc_blocks.append(
+                EncoderBlock(
+                    model_dim=model_dim,
+                    attention_heads=attention_heads,
+                    pwff_mid_dim=pwff_mid_dim,
+                    dropout_rate=dropout_rate,
+                    device=self.device
+                )
+            )
+        self.enc_blocks = nn.ModuleList(self.enc_blocks)
+        self.positional_encoder = PositionalEncodings(model_dim, self.device)
+        self.dropout_layer = nn.Dropout(p=dropout_rate)
+
+    def forward(self, x, src_lens):
+        """
+        :param x: Input tokens to Encoder layer
+        :param src_lens: Len of every input sentence (for Positional Encoding's sake)
+        :return:
+        """
+        x = self.embed_layer(x)
+        pos_encodings = self.positional_encoder.get_positional_encodings(src_lens)
+        pos_encodings = torch.transpose(pad_sequence(pos_encodings, padding_value=0.), 1, 0)
+
+        x = x + pos_encodings
+        x = self.dropout_layer(x)
+
+        for enc_block in self.enc_blocks:
+            x = enc_block(x)
+
+        return x
