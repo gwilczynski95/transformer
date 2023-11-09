@@ -208,7 +208,7 @@ class MultiHeadAttention(nn.Module):
                 )
             )
         attention_out = torch.cat(attention_out, dim=2)
-        out = self.linear(attention_out)  # todo: this probably won't work\
+        out = self.linear(attention_out)
         return out
 
 
@@ -299,3 +299,61 @@ class LayerNormalization(nn.Module):
         norm_x = (x - mean[:, :, None]) / std[:, :, None]  # expanding dims to enable proper broadcast
         out_x = self.gamma * norm_x + self.beta
         return out_x
+
+
+class EncoderBlock(nn.Module):
+    def __init__(self, model_dim=512, attention_heads=8, pwff_mid_dim=2048, dropout_rate=0.1, device=None):
+        """
+        Encoder block for the Transformer model
+        :param model_dim: Dimension of the embeddings and tokens
+        :param attention_heads: Number of attention heads
+        :param pwff_mid_dim: Dimension of the middle layer of Position-Wise Feed Forward layer
+        :param dropout_rate: Dropout rate
+        :param device: Torch device
+        """
+        super().__init__()
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = device
+
+        self.model_dim = model_dim
+        self.attention_heads = attention_heads
+        self.pwff_mid_dim = pwff_mid_dim
+        self.dropout_rate = dropout_rate
+
+        self.dropout_layer = nn.Dropout(p=dropout_rate)
+        self.ln1 = LayerNormalization(model_dim)
+        self.ln2 = LayerNormalization(model_dim)
+
+        self.mha = MultiHeadAttention(
+            num_attention_heads=attention_heads,
+            model_dim=model_dim,
+            position_wise_dim=0
+        )
+        self.pwff = PositionWiseFeedForward(
+            in_dim=model_dim,
+            mid_dim=pwff_mid_dim,
+            out_dim=model_dim
+        )
+
+    def forward(self, x):
+        x_skip = x
+        x = self.mha(x)
+        x = self.dropout_layer(x)
+        x = x + x_skip
+
+        x = self.ln1(x)
+        x_skip = x
+
+        x = self.pwff(x)
+        x = self.dropout_layer(x)
+        x = x + x_skip
+
+        x = self.ln2(x)
+
+        return x
+
+
+# class Encoder(nn.Module)
+
