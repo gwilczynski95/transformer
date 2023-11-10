@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from transformer.blocks import LinearProjection
+from transformer.blocks import LinearLayer
 
 IN_DIMS = [16, 32, 128, 512]
 OUT_DIMS = [16, 32, 128, 512]
@@ -25,7 +25,7 @@ def _loop():
 def test_linear():
     for in_dims, out_dims, weights_init, use_bias in _loop():
         inp = np.random.uniform(0, 1, [in_dims, out_dims]).astype(np.float32)
-        layer = LinearProjection(
+        layer = LinearLayer(
             in_dims,
             out_dims,
             weights_initialization=weights_init,
