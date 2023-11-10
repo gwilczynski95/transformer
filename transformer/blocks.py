@@ -303,20 +303,15 @@ class LayerNormalization(nn.Module):
 
 
 class EncoderBlock(nn.Module):
-    def __init__(self, model_dim=512, attention_heads=8, pwff_mid_dim=2048, dropout_rate=0.1, device=None):
+    def __init__(self, model_dim=512, attention_heads=8, pwff_mid_dim=2048, dropout_rate=0.1):
         """
         Encoder block for the Transformer model
         :param model_dim: Dimension of the embeddings and tokens
         :param attention_heads: Number of attention heads
         :param pwff_mid_dim: Dimension of the middle layer of Position-Wise Feed Forward layer
         :param dropout_rate: Dropout rate
-        :param device: Torch device
         """
         super().__init__()
-        if device is None:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        else:
-            self.device = device
 
         self.model_dim = model_dim
         self.attention_heads = attention_heads
@@ -330,7 +325,6 @@ class EncoderBlock(nn.Module):
         self.mha = MultiHeadAttention(
             num_attention_heads=attention_heads,
             model_dim=model_dim,
-            position_wise_dim=0
         )
         self.pwff = PositionWiseFeedForward(
             in_dim=model_dim,
@@ -388,12 +382,11 @@ class Encoder(nn.Module):
                     attention_heads=attention_heads,
                     pwff_mid_dim=pwff_mid_dim,
                     dropout_rate=dropout_rate,
-                    device=self.device
-                )
+                ).to(self.device)
             )
         self.enc_blocks = nn.ModuleList(self.enc_blocks)
         self.positional_encoder = PositionalEncodings(model_dim, self.device)
-        self.dropout_layer = nn.Dropout(p=dropout_rate)
+        self.dropout_layer = nn.Dropout(p=dropout_rate).to(self.device)
 
     def forward(self, x, src_lens):
         """
