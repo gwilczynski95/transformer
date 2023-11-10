@@ -177,12 +177,11 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, num_attention_heads, model_dim, position_wise_dim, weights_initialization="he"):
+    def __init__(self, num_attention_heads, model_dim, weights_initialization="he"):
         super().__init__()
         assert num_attention_heads in [1, 2, 4, 8]
         self.num_attention_heads = num_attention_heads
         self.model_dim = model_dim
-        self.position_wise_dim = position_wise_dim
         self.head_dim = model_dim // num_attention_heads
 
         self.linear = LinearLayer(
@@ -214,8 +213,8 @@ class MultiHeadAttention(nn.Module):
 
 
 class DecoderMultiHeadAttention(MultiHeadAttention):
-    def __init__(self, num_attention_heads, model_dim, position_wise_dim, weights_initialization="he"):
-        super().__init__(num_attention_heads, model_dim, position_wise_dim, weights_initialization)
+    def __init__(self, num_attention_heads, model_dim, weights_initialization="he"):
+        super().__init__(num_attention_heads, model_dim, weights_initialization)
 
     def forward(self, x, keys, values):
         attention_out = []
@@ -233,8 +232,8 @@ class DecoderMultiHeadAttention(MultiHeadAttention):
 
 
 class MaskedMultiHeadAttention(MultiHeadAttention):
-    def __init__(self, num_attention_heads, model_dim, position_wise_dim, weights_initialization="he"):
-        super().__init__(num_attention_heads, model_dim, position_wise_dim, weights_initialization)
+    def __init__(self, num_attention_heads, model_dim, weights_initialization="he"):
+        super().__init__(num_attention_heads, model_dim, weights_initialization)
 
     def forward(self, x, timesteps):
         attention_out = []  # todo: test masking
