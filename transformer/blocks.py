@@ -282,9 +282,10 @@ class PositionalEncodings:
 
 
 class LayerNormalization(nn.Module):
-    def __init__(self, model_dim):
+    def __init__(self, model_dim, eps=1e-8):
         super().__init__()
         self.model_dim = model_dim
+        self.eps = eps
 
         # todo: change to rand?
         self.gamma = nn.Parameter(torch.ones(self.model_dim, dtype=torch.float32))
@@ -295,7 +296,7 @@ class LayerNormalization(nn.Module):
         # mean.shape = [bs, num_of_seq]
         mean = torch.mean(x, -1)
         # std.shape = [bs, num_of_seq]
-        std = torch.std(x, -1)
+        std = torch.std(x, -1) + self.eps
         norm_x = (x - mean[:, :, None]) / std[:, :, None]  # expanding dims to enable proper broadcast
         out_x = self.gamma * norm_x + self.beta
         return out_x
