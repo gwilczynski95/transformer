@@ -129,14 +129,30 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
         )
         self.softmax = nn.Softmax()
 
-    def forward(self, query, key, value):
+    def forward(self, query, key, value, timestep=None):
         # inp [batch_size, num_of_tokens, inp_dim]
+        # todo: is this necessary?
+        query_pad_mask = torch.any(query, dim=2, keepdim=True)
+        query_pad_mask = torch.broadcast_to(query_pad_mask, query.shape).float()
+        key_pad_mask = torch.any(key, dim=2, keepdim=True)
+        key_pad_mask = torch.broadcast_to(key_pad_mask, key.shape).float()
+        pad_mask_mul = torch.bmm(query_pad_mask, torch.transpose(key_pad_mask, 2, 1))
         Q = self.layer_Q(query)
         K = self.layer_K(key)
         V = self.layer_V(value)
         _big_mul = torch.bmm(Q, torch.transpose(K, 2, 1))
         _big_mul_scaled = _big_mul / torch.sqrt(self.keys_dim)
+        if timestep is not None:
+            inf_mask = torch.full(_big_mul_scaled.shape, float("-inf"))
+            inf_mask[:, :timestep + 1, :timestep + 1] = 0
+            _big_mul_scaled = _big_mul_scaled + inf_mask
+        # todo: is this masking proper?
+        _big_mul_scaled[pad_mask_mul == 0] = torch.Tensor([float("-inf")])
         _big_mul_softed = nn.functional.softmax(_big_mul_scaled, dim=-1)  # todo: this softmax works as intended?
+        if timestep is not None:  # todo: is this ok? otherwise we've got nans
+            _big_mul_softed[:, timestep + 1:, :] = 0.
+        # todo: is this masking proper?
+        _big_mul_softed[pad_mask_mul == 0] = 0.
         _big_tokens = torch.bmm(_big_mul_softed, V)
         return _big_tokens
 
@@ -235,19 +251,16 @@ class MaskedMultiHeadAttention(MultiHeadAttention):
     def __init__(self, num_attention_heads, model_dim, weights_initialization="he"):
         super().__init__(num_attention_heads, model_dim, weights_initialization)
 
-    def forward(self, x, timesteps):
+    def forward(self, x, timestep):
         attention_out = []  # todo: test masking
-        mask = torch.ones(x.shape)
-        for batch_idx in range(x.shape[0]):
-            mask[batch_idx, timesteps[batch_idx] + 1:, :] = torch.Tensor(float("-inf"))
-        inp = x * mask
         for head_idx, attention_head in enumerate(self.attention_heads):
             # create mask
             attention_out.append(
                 attention_head(
-                    inp[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
-                    inp[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
-                    inp[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)]
+                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
+                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
+                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
+                    timestep=timestep
                 )
             )
         attention_out = torch.cat(attention_out, dim=2)
@@ -350,7 +363,7 @@ class EncoderBlock(nn.Module):
         return x
 
 
-class Encoder(nn.Module):
+class Encoder(nn.Module):  # TODO: WHY I HAVE THOSE SINUSOIDAL PATTERNS
     def __init__(self, embedding_layer, encoder_blocks=6, model_dim=512, attention_heads=8, pwff_mid_dim=2048,
                  dropout_rate=0.1, device=None):
         """
@@ -403,5 +416,68 @@ class Encoder(nn.Module):
 
         for enc_block in self.enc_blocks:
             x = enc_block(x)
+
+        return x
+
+
+class DecoderBlock(nn.Module):
+    def __init__(self, model_dim=512, attention_heads=8, pwff_mid_dim=2048, dropout_rate=0.1):
+        """
+        Decoder block for the Transformer model
+        :param model_dim: Dimension of the embeddings and tokens
+        :param attention_heads: Number of attention heads
+        :param pwff_mid_dim: Dimension of the middle layer of Position-Wise Feed Forward layer
+        :param dropout_rate: Dropout rate
+        """
+        super().__init__()
+        self.model_dim = model_dim
+        self.attention_heads = attention_heads
+        self.pwff_mid_dim = pwff_mid_dim
+        self.dropout_rate = dropout_rate
+
+        self.dropout_layer = nn.Dropout(p=dropout_rate)
+        self.ln1 = LayerNormalization(model_dim)
+        self.ln2 = LayerNormalization(model_dim)
+        self.ln3 = LayerNormalization(model_dim)
+
+        self.m_mha = MaskedMultiHeadAttention(
+            num_attention_heads=attention_heads,
+            model_dim=model_dim,
+        )
+        self.d_mha = DecoderMultiHeadAttention(
+            num_attention_heads=attention_heads,
+            model_dim=model_dim
+        )
+        self.pwff = PositionWiseFeedForward(
+            in_dim=model_dim,
+            mid_dim=pwff_mid_dim,
+            out_dim=model_dim
+        )
+
+    def forward(self, x, enc_x, timestep):
+        skip_x = x
+
+        x = self.m_mha(x, timestep)
+        x = self.dropout_layer(x)
+        # todo: shouldn't the input for timesteps > t be masked out (while adding the skip connection)?
+        # todo: doesn't it violate the autoregressive fashion?
+        x = skip_x + x
+        x = self.ln1(x)
+
+        skip_x = x
+        x = self.d_mha(
+            x,
+            enc_x,
+            enc_x
+        )
+        x = self.dropout_layer(x)
+        x = skip_x + x
+        x = self.ln2(x)
+
+        skip_x = x
+        x = self.pwff(x)
+        x = self.dropout_layer(x)
+        x = skip_x + x
+        x = self.ln3(x)
 
         return x
