@@ -455,10 +455,13 @@ class DecoderBlock(nn.Module):
     def forward(self, x, enc_x, timestep):
         skip_x = x
 
+        # add mask to skip_x
+        skip_mask = torch.ones(skip_x.shape)
+        skip_mask[:, timestep:, :] = 0.
+        skip_x = skip_x * skip_mask
+
         x = self.m_mha(x, timestep)
         x = self.dropout_layer(x)
-        # todo: shouldn't the input for timesteps > t be masked out (while adding the skip connection)?
-        # todo: doesn't it violate the autoregressive fashion?
         x = skip_x + x
         x = self.ln1(x)
 
