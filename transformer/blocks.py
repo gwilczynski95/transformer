@@ -131,7 +131,6 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
 
     def forward(self, query, key, value, timestep=None):
         # inp [batch_size, num_of_tokens, inp_dim]
-        # todo: is this necessary?
         query_pad_mask = torch.any(query, dim=2, keepdim=True)
         query_pad_mask = torch.broadcast_to(query_pad_mask, query.shape).float()
         key_pad_mask = torch.any(key, dim=2, keepdim=True)
@@ -252,9 +251,8 @@ class MaskedMultiHeadAttention(MultiHeadAttention):
         super().__init__(num_attention_heads, model_dim, weights_initialization)
 
     def forward(self, x, timestep):
-        attention_out = []  # todo: test masking
+        attention_out = []
         for head_idx, attention_head in enumerate(self.attention_heads):
-            # create mask
             attention_out.append(
                 attention_head(
                     x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
@@ -480,4 +478,57 @@ class DecoderBlock(nn.Module):
         x = skip_x + x
         x = self.ln3(x)
 
+        return x
+
+
+class Decoder(nn.Module):
+    def __init__(self, embedding_layer, decoder_blocks=6, model_dim=512, attention_heads=8,
+                 pwff_mid_dim=2048, dropout_rate=0.1, device=None):
+        super().__init__()
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = device
+        self.embed_layer = embedding_layer
+        self.model_dim = model_dim
+        self.attention_heads = attention_heads
+        self.pwff_mid_dim = pwff_mid_dim
+        self.dropout_rate = dropout_rate
+
+        self.dec_blocks = []
+        for _ in range(decoder_blocks):
+            self.dec_blocks.append(
+                DecoderBlock(
+                    model_dim=model_dim,
+                    attention_heads=attention_heads,
+                    pwff_mid_dim=pwff_mid_dim,
+                    dropout_rate=dropout_rate
+                ).to(self.device)
+            )
+        self.dec_blocks = nn.ModuleList(self.dec_blocks)
+        self.positional_encoder = PositionalEncodings(model_dim, self.device)
+        self.dropout_layer = nn.Dropout(p=dropout_rate).to(self.device)
+
+    def forward(self, x, tgt_lens, enc_x, timestep):
+        """
+        :param x: Input tokens to Decoder layer
+        :param tgt_lens: Len of every input sentence (for Positionel Encoding's sake)
+        :param enc_x: Output from Embedding block
+        :param timestep: Which timestep should the decoder output now? (Masking)
+        :return:
+        """
+        x = self.embed_layer(x)
+        pos_encodings = self.positional_encoder.get_positional_encodings(tgt_lens)
+        pos_encodings = torch.transpose(pad_sequence(pos_encodings, padding_value=0.), 1, 0)
+
+        x = x + pos_encodings
+        x = self.dropout_layer(x)
+
+        for dec_block in self.dec_blocks:
+            x = dec_block.forward(x, enc_x, timestep)
+
+        # now do the linear layer but with embedding weights
+        x = torch.matmul(x, self.embed_layer.weight.T)
+
+        # now softmax but probably it's better to do it outside the decoder
         return x
