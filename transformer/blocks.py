@@ -77,6 +77,23 @@ class ReuseLinearLayer(LinearLayer):
         return _out
 
 
+class ScaledEmbedding(nn.Module):
+    def __init__(self, embed_size, model_dim, padding_idx):
+        super().__init__()
+        self.embed_size = embed_size
+        self.model_dim = model_dim
+        self.padding_idx = padding_idx
+
+        self.embedding = nn.Embedding(
+            embed_size,
+            model_dim,
+            padding_idx=padding_idx
+        )
+
+    def forward(self, x):
+        return self.embedding(x) * torch.sqrt(self.model_dim)
+
+
 class PositionWiseFeedForward(nn.Module):
     def __init__(self, in_dim, mid_dim, out_dim, weights_initialization="he",
                  bias_initialization="zeros"):
@@ -362,7 +379,7 @@ class EncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):  # TODO: WHY I HAVE THOSE SINUSOIDAL PATTERNS
-    def __init__(self, embedding_layer, encoder_blocks=6, model_dim=512, attention_heads=8, pwff_mid_dim=2048,
+    def __init__(self, embed_size, padding_idx, encoder_blocks=6, model_dim=512, attention_heads=8, pwff_mid_dim=2048,
                  dropout_rate=0.1, device=None):
         """
         Encoder for the Transformer model
@@ -379,7 +396,11 @@ class Encoder(nn.Module):  # TODO: WHY I HAVE THOSE SINUSOIDAL PATTERNS
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             self.device = device
-        self.embed_layer = embedding_layer
+        self.embed_layer = ScaledEmbedding(
+            embed_size,
+            model_dim,
+            padding_idx
+        )
         self.model_dim = model_dim
         self.attention_heads = attention_heads
         self.pwff_mid_dim = pwff_mid_dim
@@ -485,14 +506,18 @@ class DecoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, embedding_layer, decoder_blocks=6, model_dim=512, attention_heads=8,
+    def __init__(self, embed_size, padding_idx, decoder_blocks=6, model_dim=512, attention_heads=8,
                  pwff_mid_dim=2048, dropout_rate=0.1, device=None):
         super().__init__()
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             self.device = device
-        self.embed_layer = embedding_layer
+        self.embed_layer = ScaledEmbedding(
+            embed_size,
+            model_dim,
+            padding_idx
+        )
         self.model_dim = model_dim
         self.attention_heads = attention_heads
         self.pwff_mid_dim = pwff_mid_dim
@@ -531,7 +556,7 @@ class Decoder(nn.Module):
             x = dec_block.forward(x, enc_x, timestep)
 
         # now do the linear layer but with embedding weights
-        x = torch.matmul(x, self.embed_layer.weight.T)
+        x = torch.matmul(x, self.embed_layer.embedding.weight.T)
 
         # now softmax but probably it's better to do it outside the decoder
         return x
