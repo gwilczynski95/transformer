@@ -568,3 +568,52 @@ class Decoder(nn.Module):
 
         # now softmax but probably it's better to do it outside the decoder
         return x
+
+
+class TransformerModel(nn.Module):
+    def __init__(self, dec_embed_size, enc_embed_size, padding_idx, enc_dec_blocks=6, model_dim=512, attention_heads=8,
+                 pwff_mid_dim=2048, dropout_rate=0.1, device=None):
+        super().__init__()
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = device
+        self.dec_embed_size = dec_embed_size
+        self.enc_embed_size = enc_embed_size
+        self.enc_dec_blocks = enc_dec_blocks
+        self.model_dim = model_dim
+        self.attention_heads = attention_heads
+        self.pwff_mid_dim = pwff_mid_dim
+        self.dropout_rate = dropout_rate
+
+        self.encoder = Encoder(
+            enc_embed_size,
+            padding_idx,
+            encoder_blocks=enc_dec_blocks,
+            model_dim=model_dim,
+            attention_heads=attention_heads,
+            pwff_mid_dim=pwff_mid_dim,
+            dropout_rate=dropout_rate,
+            device=self.device
+        ).to(self.device)
+        self.decoder = Decoder(
+            dec_embed_size,
+            padding_idx,
+            decoder_blocks=enc_dec_blocks,
+            model_dim=model_dim,
+            attention_heads=attention_heads,
+            pwff_mid_dim=pwff_mid_dim,
+            dropout_rate=dropout_rate,
+            device=self.device
+        ).to(self.device)
+
+    def forward(self, x, y, src_lens, tgt_lens):
+        tgt_input_lens = [x - 1 for x in tgt_lens]
+        max_tgt_len = y.shape[-1]
+
+        out = []
+        enc_x = self.encoder(x, src_lens)
+        for timestep in range(max_tgt_len):
+            output = self.decoder(y, tgt_input_lens, enc_x, timestep)
+            out.append(output[:, timestep: timestep + 1, :])
+        return torch.cat(out, dim=1)
