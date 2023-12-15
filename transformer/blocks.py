@@ -90,6 +90,8 @@ class ScaledEmbedding(nn.Module):
             padding_idx=padding_idx
         )
 
+        self.model_dim = torch.tensor(self.model_dim, dtype=torch.float32)
+
     def forward(self, x):
         return self.embedding(x) * torch.sqrt(self.model_dim)
 
@@ -159,16 +161,22 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
         _big_mul = torch.bmm(Q, torch.transpose(K, 2, 1))
         _big_mul_scaled = _big_mul / torch.sqrt(self.keys_dim)
         if timestep is not None:
-            inf_mask = torch.full(_big_mul_scaled.shape, float("-inf"))
-            inf_mask[:, :timestep + 1, :timestep + 1] = 0
-            _big_mul_scaled = _big_mul_scaled + inf_mask
+            # inf_mask = torch.full(_big_mul_scaled.shape, float("-inf"))
+            # inf_mask[:, :timestep + 1, :timestep + 1] = 0
+            # _big_mul_scaled = _big_mul_scaled + inf_mask
+            # scores = scores.masked_fill(mask == 0, -1e9)
+            inf_mask = torch.zeros(_big_mul_scaled.shape)
+            inf_mask[:, :timestep + 1, :timestep + 1] = 1
+            _big_mul_scaled = _big_mul_scaled.detach().masked_fill(inf_mask == 0, -1e9)
         # todo: is this masking proper?
-        _big_mul_scaled[pad_mask_mul == 0] = torch.Tensor([float("-inf")])
+        # _big_mul_scaled[pad_mask_mul == 0] = torch.Tensor([float("-inf")])
+        _big_mul_scaled = _big_mul_scaled.detach().masked_fill(pad_mask_mul == 0, -1e9)
         _big_mul_softed = nn.functional.softmax(_big_mul_scaled, dim=-1)  # todo: this softmax works as intended?
         if timestep is not None:  # todo: is this ok? otherwise we've got nans
             _big_mul_softed[:, timestep + 1:, :] = 0.
         # todo: is this masking proper?
-        _big_mul_softed[pad_mask_mul == 0] = 0.
+        # _big_mul_softed[pad_mask_mul == 0] = 0.
+        _big_mul_softed = _big_mul_softed.detach().masked_fill(pad_mask_mul == 0, 0.)
         _big_tokens = torch.bmm(_big_mul_softed, V)
         return _big_tokens
 
@@ -478,7 +486,7 @@ class DecoderBlock(nn.Module):
 
         # add mask to skip_x
         skip_mask = torch.ones(skip_x.shape)
-        skip_mask[:, timestep:, :] = 0.
+        skip_mask[:, timestep + 1:, :] = 0.  # todo: is this ok
         skip_x = skip_x * skip_mask
 
         x = self.m_mha(x, timestep)
