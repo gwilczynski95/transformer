@@ -107,11 +107,12 @@ class DeEnSetGenerator:
         tgt_batch = pad_sequence(tgt_batch, padding_value=pad_idx)
         return src_batch, tgt_batch, src_seq_len, tgt_seq_len
 
-    def get_set(self, batch_size, mode="train"):
+    def get_set(self, batch_size, mode="train", shuffle=True):
         assert mode in ["train", "valid"]
         _iter = Multi30k(split=mode, language_pair=(self.src_language, self.tgt_language))
         return DataLoader(
             _iter,
             batch_size=batch_size,
-            collate_fn=self.partial_collate
+            collate_fn=self.partial_collate,
+            shuffle=shuffle
         )
