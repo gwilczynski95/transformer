@@ -618,3 +618,25 @@ class TransformerModel(nn.Module):
             output = self.decoder(y, tgt_input_lens, enc_x, timestep)
             out.append(output[:, timestep: timestep + 1, :])
         return torch.cat(out, dim=1)
+
+    def forward_gen(self, x, src_lens, max_len, bos_idx, temperature):  # todo: test this
+        enc_x = self.encoder(x, src_lens)
+        out_tokens = torch.full([x.shape[0], 1], bos_idx, dtype=torch.int64)
+        out_lens = [1] * x.shape[0]
+        out_probas = None
+        for _ in range(max_len):
+            dec_probas = self.decoder(out_tokens, out_lens, enc_x, None)
+            if out_probas is None:
+                out_probas = dec_probas
+            else:
+                out_probas = torch.cat([
+                    out_probas,
+                    dec_probas[:, -1:, :]
+                ],
+                    dim=1
+                )
+            _p = torch.softmax(dec_probas / temperature, dim=-1).detach().numpy()[:, -1, :]
+            dec_tokens = np.random.choice(np.arange(_p.shape[-1]), p=_p)
+            out_tokens = torch.cat([out_tokens, torch.tensor(dec_tokens)], dim=-1)
+            out_lens = [x + 1 for x in out_lens]
+        return out_tokens, out_probas
