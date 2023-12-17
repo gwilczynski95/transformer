@@ -4,7 +4,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from nltk.translate.bleu_score import corpus_bleu
+from torcheval.metrics.functional.text import bleu_score
+from nltk import word_tokenize
 from nltk.translate.meteor_score import meteor_score
 
 import config
@@ -34,11 +35,13 @@ class Trainer:
 
     def train(self, epochs, optimizer_params, checkpoint_path=None):
         # todo: add proper optimizer
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(ignore_index=self.set_loader.pad_idx)
         optimizer = optim.Adam(self.model.parameters(), lr=optimizer_params["lr"])
+        print("Start training")
 
         start_epoch = 0
         if checkpoint_path:
+            print("Load checkpoint")
             checkpoint = torch.load(checkpoint_path)
             self.model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -52,6 +55,7 @@ class Trainer:
         for epoch in range(start_epoch, epochs):
             self.model.train()
             running_loss = 0.0
+            _iters = 0
             for src, tgt, src_lens, tgt_lens in self.train_loader:
                 src = src.to(self.device).T
                 tgt = tgt.to(self.device).T
@@ -65,14 +69,16 @@ class Trainer:
                 optimizer.step()
 
                 running_loss += loss.item()
+                _iters += 1
 
-            avg_loss = running_loss / len(self.train_loader)
+            avg_loss = running_loss / _iters
             print(f'Epoch {epoch + 1}, Loss: {avg_loss}')
 
             self.log_metrics(epoch, "Train", avg_loss)
 
             # Save checkpoint
             save_path = Path(self.model_dir, "checkpoints", f"step_{epoch + 1}")
+            save_path.parent.mkdir(parents=True, exist_ok=True)
             self.save_checkpoint(epoch, save_path, optimizer)
 
             # Evaluate on validation set if available
@@ -86,24 +92,28 @@ class Trainer:
         hypotheses = []
         running_loss = 0.0
         with torch.no_grad():
+            _iters = 0
             for src, tgt, src_lens, tgt_lens in data_loader:
-
+                src = src.to(self.device).T
+                tgt = tgt.to(self.device).T
+                tgt = tgt[:, 1:]
                 out_tokens, out_probas = self.model.forward_gen(
-                    src, src_lens, max(tgt_lens), self.set_loader.bos_idx, temperature
+                    src, src_lens, max(tgt_lens) - 1, self.set_loader.bos_idx, temperature
                 )
                 output_texts = parse_tokens(out_tokens, self.set_loader.vocab_transform["en"])
-                label_texts = parse_tokens(tgt[:, 1:], self.set_loader.vocab_transform["en"])
+                label_texts = parse_tokens(tgt, self.set_loader.vocab_transform["en"])
 
-                references.append(label_texts)
-                hypotheses.append(output_texts)
+                references.extend(label_texts)
+                hypotheses.extend(output_texts)
 
-                loss = loss_fn(out_probas.reshape(-1, out_probas.shape[-1]), tgt[:, 1:].reshape(-1))
+                loss = loss_fn(out_probas.reshape(-1, out_probas.shape[-1]), tgt.reshape(-1))
                 running_loss += loss.item()
+                _iters += 1
 
-        running_loss /= len(data_loader)
-        bleu_score, meteor_average = self._calculate_metrics(references, hypotheses)
+        running_loss /= _iters
+        bleu_res, meteor_average = self._calculate_metrics(references, hypotheses)
 
-        return running_loss, bleu_score, meteor_average
+        return running_loss, bleu_res, meteor_average
 
     def save_checkpoint(self, epoch, path, optimizer):
         if path:
@@ -115,10 +125,12 @@ class Trainer:
 
     @staticmethod
     def _calculate_metrics(references, hypotheses):
-        bleu_score = corpus_bleu(references, hypotheses)
-        meteor_scores = [meteor_score(ref, hyp) for ref, hyp in zip(references, hypotheses)]
+        bleu_res = bleu_score(hypotheses, [[x] for x in references]).item()
+        meteor_scores = [
+            meteor_score([word_tokenize(ref)], word_tokenize(hyp)) for hyp, ref in zip(hypotheses, references)
+        ]
         meteor_average = sum(meteor_scores) / len(meteor_scores)
-        return bleu_score, meteor_average
+        return bleu_res, meteor_average
 
     def log_metrics(self, epoch, phase, loss, bleu=None, meteor=None):
         self.writer.add_scalar(f'{phase}/Loss', loss, epoch)

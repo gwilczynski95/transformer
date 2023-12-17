@@ -23,6 +23,7 @@ def main():
         config.experiment_parent_path,
         config.experiment_name
     )
+    model_dir.mkdir(parents=True, exist_ok=True)
     trainer = Trainer(
         model_dir,
         model,
