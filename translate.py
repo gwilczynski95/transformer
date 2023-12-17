@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torch.nn.utils.rnn import pad_sequence
 
 
 class DeEnTranslator:
@@ -11,26 +12,40 @@ class DeEnTranslator:
         self._src_lang = "de"
         self._tgt_lang = "en"
 
-    def generate(self, sentence):
-        max_out_len = len(sentence) + 5
+    def generate(self, sentences, max_out_len=None):
+        self.model.eval()
 
-        de_tokens = self.set_gen.text_transforms[self._src_lang](sentence)[np.newaxis]
-        en_tokens = torch.tensor([[self.set_gen.bos_idx]], dtype=torch.int64)
+        max_out_len = max_out_len if max_out_len is not None else max([len(x.split(" ")) for x in sentences]) + 7
 
-        de_tokens_lens = [de_tokens.shape[-1]]
-        en_tokens_lens = [1]
+        de_tokens = [self.set_gen.text_transforms[self._src_lang](x) for x in sentences]
 
-        enc_x = self.model.encoder(de_tokens, de_tokens_lens)
+        de_tokens_lens = [x.shape[0] for x in de_tokens]
+        de_tokens = torch.transpose(pad_sequence(de_tokens, padding_value=self.set_gen.pad_idx), 1, 0)
 
-        for _ in range(max_out_len):
-            dec_out = self.model.decoder(en_tokens, en_tokens_lens, enc_x, None)
-            _p = torch.softmax(dec_out / self.temperature, dim=-1).detach().numpy()[0, -1, :]
-            token = np.random.choice(np.arange(len(_p)), p=_p)
-            en_tokens = torch.cat([en_tokens, torch.tensor([[token]])], dim=-1)
-            en_tokens_lens[0] += 1
-            if token == self.set_gen.eos_idx:
-                break
+        with torch.no_grad():
+            en_tokens, _ = self.model.forward_gen(
+                de_tokens, de_tokens_lens, max_out_len, self.set_gen.bos_idx, self.temperature
+            )
 
-        return " ".join(
-            self.set_gen.vocab_transform[self._tgt_lang].lookup_tokens(en_tokens.cpu().numpy()[0].tolist())
-        ).replace("<bos>", "").replace("<eos>", "")
+        return self.parse_tokens(en_tokens, self.set_gen.vocab_transform[self._tgt_lang])
+
+
+def parse_tokens(tokens, vocab_transform, bos_symbol="<bos>", eos_symbol="<eos>"):
+    out = []
+    for sent_idx in range(tokens.shape[0]):
+        sentence = vocab_transform.lookup_tokens(
+            tokens[sent_idx, :].cpu().numpy().tolist()
+        )[1:]
+        try:
+            bos_idx = sentence.index(bos_symbol)
+            sentence = sentence[bos_idx + 1:]
+        except ValueError:
+            pass
+        try:
+            eos_idx = sentence.index(eos_symbol)
+            sentence = sentence[:eos_idx]
+        except ValueError:
+            pass
+        out.append(" ".join(sentence))
+    return out
+
