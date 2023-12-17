@@ -1,7 +1,8 @@
-experiment_name = "test_1"
+experiment_name = "adam_test_1"
+experiment_parent_path = ""
 checkpoint_path = None
+batch_size = 64
 
-_batch_size = 64
 _multi_30k_train_samples = 29008
 
 model_hyperparams = {
@@ -13,12 +14,15 @@ model_hyperparams = {
 }
 
 training_hyperparams = {
-    "batch_size": _batch_size,
-    "epochs": int(105000 / (_multi_30k_train_samples / _batch_size)),
-    "optimizer": {
-        "warmup_steps": 4000,
-        "beta_1": 0.9,
-        "beta_2": 0.98,
-        "eps": 1e-9
-    }
+    "epochs": int(105000 / (_multi_30k_train_samples / batch_size)),
+    # "optimizer_params": {
+    #     "warmup_steps": 4000,
+    #     "beta_1": 0.9,
+    #     "beta_2": 0.98,
+    #     "eps": 1e-9
+    # },
+    "optimizer_params": {
+        "lr": 1e-3
+    },
+    "checkpoint_path": checkpoint_path
 }
