@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import config
 from data import DeEnSetGenerator
 from trainer import Trainer
@@ -16,24 +18,18 @@ def main():
         }
     )
 
-    train_loader = loader.get_set(
-        config.training_hyperparams["batch_size"],
-        mode="train",
-        shuffle=True
-    )
-    val_loader = loader.get_set(
-        config.training_hyperparams["batch_size"],
-        mode="valid",
-        shuffle=False
-    )
-
     # Create the trainer and start training
-    trainer = Trainer(model, train_loader, val_loader, device='cuda')
-    trainer.train(
-        config.training_hyperparams["epochs"],
-        config.training_hyperparams["optimizer"],
-        config.checkpoint_path
+    model_dir = Path(
+        config.experiment_parent_path,
+        config.experiment_name
     )
+    trainer = Trainer(
+        model_dir,
+        model,
+        loader,
+        device='cuda'
+    )
+    trainer.train(**config.training_hyperparams)
 
 
 if __name__ == "__main__":
