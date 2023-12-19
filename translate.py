@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
@@ -49,3 +48,43 @@ def parse_tokens(tokens, vocab_transform, bos_symbol="<bos>", eos_symbol="<eos>"
         out.append(" ".join(sentence))
     return out
 
+
+def _load_model_and_set(path_to_model):
+    import config
+    from data import DeEnSetGenerator
+    from transformer.blocks import TransformerModel
+
+    loader = DeEnSetGenerator()
+    model = TransformerModel(
+        **{
+            "dec_embed_size": len(loader.vocab_transform["en"]),
+            "enc_embed_size": len(loader.vocab_transform["de"]),
+            "padding_idx": loader.pad_idx,
+            **config.model_hyperparams
+        }
+    )
+    checkpoint = torch.load(path_to_model)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    return model, loader
+
+
+def main():
+    path_to_model = ""
+    temperature = 1.
+    model, dataloader = _load_model_and_set(path_to_model)
+    translator = DeEnTranslator(
+        model,
+        dataloader,
+        temperature
+    )
+
+    print("Type German sentence and prepare for a translation!!!")
+    while True:
+        german_sentence = input("Type the sentence: ")
+        print(
+            translator.generate([german_sentence])[0]
+        )
+
+
+if __name__ == '__main__':
+    main()
