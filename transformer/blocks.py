@@ -93,7 +93,7 @@ class ScaledEmbedding(nn.Module):
         self.model_dim = torch.tensor(self.model_dim, dtype=torch.float32)
 
     def forward(self, x):
-        return self.embedding(x) * torch.sqrt(self.model_dim)
+        return self.embedding(x) * torch.sqrt(self.model_dim).to(x.device)
 
 
 class PositionWiseFeedForward(nn.Module):
@@ -165,7 +165,7 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
             # inf_mask[:, :timestep + 1, :timestep + 1] = 0
             # _big_mul_scaled = _big_mul_scaled + inf_mask
             # scores = scores.masked_fill(mask == 0, -1e9)
-            inf_mask = torch.zeros(_big_mul_scaled.shape)
+            inf_mask = torch.zeros(_big_mul_scaled.shape, device=query.device)
             inf_mask[:, :timestep + 1, :timestep + 1] = 1
             _big_mul_scaled = _big_mul_scaled.detach().masked_fill(inf_mask == 0, -1e9)
         # todo: is this masking proper?
@@ -486,7 +486,7 @@ class DecoderBlock(nn.Module):
 
         # add mask to skip_x
         if timestep is not None:
-            skip_mask = torch.ones(skip_x.shape)
+            skip_mask = torch.ones(skip_x.shape).to(x.device)
             skip_mask[:, timestep + 1:, :] = 0.
             skip_x = skip_x * skip_mask
 
@@ -621,7 +621,7 @@ class TransformerModel(nn.Module):
 
     def forward_gen(self, x, src_lens, max_len, bos_idx, temperature):
         enc_x = self.encoder(x, src_lens)
-        out_tokens = torch.full([x.shape[0], 1], bos_idx, dtype=torch.int64)
+        out_tokens = torch.full([x.shape[0], 1], bos_idx, dtype=torch.int64, device=x.device)
         out_lens = [1] * x.shape[0]
         out_probas = None
         for _ in range(max_len):
@@ -635,12 +635,12 @@ class TransformerModel(nn.Module):
                 ],
                     dim=1
                 )
-            _p = torch.softmax(dec_probas / temperature, dim=-1).detach().numpy()[:, -1, :]
+            _p = torch.softmax(dec_probas / temperature, dim=-1).cpu().detach().numpy()[:, -1, :]
             dec_tokens = np.array(
                 [
                     [np.random.choice(np.arange(_p.shape[-1]), p=_p[x])] for x in range(x.shape[0])
                 ]
             )
-            out_tokens = torch.cat([out_tokens, torch.tensor(dec_tokens)], dim=-1)
+            out_tokens = torch.cat([out_tokens, torch.tensor(dec_tokens, device=x.device)], dim=-1)
             out_lens = [x + 1 for x in out_lens]
         return out_tokens, out_probas

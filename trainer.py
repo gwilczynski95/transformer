@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from torcheval.metrics.functional.text import bleu_score
+import tqdm
 from nltk import word_tokenize
 from nltk.translate.meteor_score import meteor_score
 
@@ -47,10 +48,14 @@ class Trainer:
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             start_epoch = checkpoint['epoch']
 
-            self.model_dir = Path(checkpoint_path.parent.parent)
+            self.model_dir = Path(checkpoint_path).parent.parent
             self.writer = SummaryWriter(
                 Path(self.model_dir, "logs")
             )
+
+        outer = tqdm.tqdm(total=epochs - start_epoch, desc="Epoch", position=0)
+        train_status = tqdm.tqdm(total=0, position=1, bar_format="{desc}")
+        val_status = tqdm.tqdm(total=0, position=2, bar_format="{desc}")
 
         for epoch in range(start_epoch, epochs):
             self.model.train()
@@ -72,7 +77,7 @@ class Trainer:
                 _iters += 1
 
             avg_loss = running_loss / _iters
-            print(f'Epoch {epoch + 1}, Loss: {avg_loss}')
+            train_status.set_description_str(f"Epoch {epoch}, train loss: {avg_loss}")
 
             self.log_metrics(epoch, "Train", avg_loss)
 
@@ -85,6 +90,11 @@ class Trainer:
             if self.val_loader is not None:
                 val_loss, val_bleu, val_meteor = self.calculate_metrics(self.val_loader, criterion)
                 self.log_metrics(epoch, "Validation", val_loss, val_bleu, val_meteor)
+                val_status.set_description_str(
+                    f"Epoch {epoch}, val loss: {val_loss}, val bleu: {val_bleu}, val meteor: {val_meteor}"
+                )
+
+            outer.update(1)
 
     def calculate_metrics(self, data_loader, loss_fn, temperature=1.):
         self.model.eval()
