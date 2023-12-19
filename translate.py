@@ -10,13 +10,15 @@ class DeEnTranslator:
 
         self._src_lang = "de"
         self._tgt_lang = "en"
+        self.device = "cuda" if torch.cuda.is_available() else 'cpu'
+        self.model.to(self.device)
 
     def generate(self, sentences, max_out_len=None):
         self.model.eval()
 
         max_out_len = max_out_len if max_out_len is not None else max([len(x.split(" ")) for x in sentences]) + 7
 
-        de_tokens = [self.set_gen.text_transforms[self._src_lang](x) for x in sentences]
+        de_tokens = [self.set_gen.text_transforms[self._src_lang](x).to(self.device) for x in sentences]
 
         de_tokens_lens = [x.shape[0] for x in de_tokens]
         de_tokens = torch.transpose(pad_sequence(de_tokens, padding_value=self.set_gen.pad_idx), 1, 0)
@@ -26,7 +28,7 @@ class DeEnTranslator:
                 de_tokens, de_tokens_lens, max_out_len, self.set_gen.bos_idx, self.temperature
             )
 
-        return self.parse_tokens(en_tokens, self.set_gen.vocab_transform[self._tgt_lang])
+        return parse_tokens(en_tokens, self.set_gen.vocab_transform[self._tgt_lang])
 
 
 def parse_tokens(tokens, vocab_transform, bos_symbol="<bos>", eos_symbol="<eos>"):
