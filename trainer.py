@@ -10,6 +10,7 @@ from nltk import word_tokenize
 from nltk.translate.meteor_score import meteor_score
 
 import config
+from data import create_masks
 from translate import parse_tokens
 
 
@@ -67,8 +68,10 @@ class Trainer:
                 tgt_input = tgt[:, :-1]
                 tgt = tgt[:, 1:]
 
+                src_mask, tgt_mask = create_masks(src, tgt_input, self.set_loader.pad_idx)
+
                 optimizer.zero_grad()
-                outputs = self.model(src, tgt_input, src_lens, tgt_lens)
+                outputs = self.model(src, tgt_input, src_lens, tgt_lens, src_mask, tgt_mask)
                 loss = criterion(outputs.reshape(-1, outputs.shape[-1]), tgt.reshape(-1))
                 loss.backward()
                 optimizer.step()
@@ -107,8 +110,11 @@ class Trainer:
                 src = src.to(self.device).T
                 tgt = tgt.to(self.device).T
                 tgt = tgt[:, 1:]
+
+                src_mask, _ = create_masks(src, None, self.set_loader.pad_idx)
+
                 out_tokens, out_probas = self.model.forward_gen(
-                    src, src_lens, max(tgt_lens) - 1, self.set_loader.bos_idx, temperature
+                    src, src_lens, src_mask, max(tgt_lens) - 1, self.set_loader.bos_idx, temperature
                 )
                 output_texts = parse_tokens(out_tokens, self.set_loader.vocab_transform["en"])
                 label_texts = parse_tokens(tgt, self.set_loader.vocab_transform["en"])

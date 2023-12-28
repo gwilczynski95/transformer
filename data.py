@@ -34,6 +34,19 @@ def _tensor_transform(token_ids: List[int], bos_idx: int, eos_idx: int):
     )
 
 
+def create_masks(src, tgt, pad_idx):
+    src_mask = (src != pad_idx).unsqueeze(-2)
+
+    tgt_mask = None
+    if tgt is not None:
+        pad_tgt_mask = (tgt != pad_idx).unsqueeze(-2)
+        time_mask = torch.triu(torch.ones((pad_tgt_mask.shape[-1], pad_tgt_mask.shape[-1])), diagonal=1) == 0
+        time_mask = time_mask.type_as(pad_tgt_mask.data)
+        tgt_mask = pad_tgt_mask & time_mask
+
+    return src_mask, tgt_mask
+
+
 class DeEnSetGenerator:
     def __init__(self):
         multi30k.URL["train"] = \
