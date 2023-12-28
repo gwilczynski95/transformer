@@ -50,33 +50,6 @@ class LinearLayer(nn.Module):
         return _out
 
 
-class ReuseLinearLayer(LinearLayer):
-    def __init__(self, layer, scaling_factor=1, transpose=False):
-        if transpose and layer.use_bias:
-            raise ValueError("Cannot set transpose flag while using bias from another layer")
-
-        super().__init__(
-            layer.in_dimension,
-            layer.out_dimension,
-            use_bias=layer.use_bias,
-            freeze=layer.freeze,
-            scaling_factor=scaling_factor
-        )
-
-        self.parent_layer = layer
-        self.transpose = transpose
-
-    def forward(self, x):  # todo: test if sharing weights works with backprop
-        self.weights = self.parent_layer.weights.clone()
-        if self.transpose:
-            _out = torch.matmul(x, self.weights.T * self.scaling_factor)
-        else:
-            _out = torch.matmul(x, self.weights * self.scaling_factor)
-        if self.use_bias:
-            _out = torch.add(_out, self.bias)
-        return _out
-
-
 class ScaledEmbedding(nn.Module):
     def __init__(self, embed_size, model_dim, padding_idx):
         super().__init__()
@@ -334,7 +307,7 @@ class EncoderBlock(nn.Module):
         x = self.mha(x, x, x, src_mask)
         x = self.dropout_layer(x)
         x = x + x_skip
-
+        # todo: in harvard transformer normalization is after creating the skip connection not before it
         x = self.ln1(x)
         x_skip = x
 
@@ -571,21 +544,18 @@ class TransformerModel(nn.Module):
 
     def forward(self, x, y, src_lens, tgt_lens, src_mask, tgt_mask):
         tgt_input_lens = [x - 1 for x in tgt_lens]
-        max_tgt_len = y.shape[-1]
-
-        out = []
         enc_x = self.encoder(x, src_lens, src_mask)  # todo: test this
-        out = self.decoder(y, tgt_lens, enc_x, src_mask, tgt_mask)
+        out = self.decoder(y, tgt_input_lens, enc_x, src_mask, tgt_mask)
         return out
 
-    def forward_gen(self, x, src_lens, max_len, bos_idx, temperature):
-        # todo: rewrite this
-        enc_x = self.encoder(x, src_lens)
+    def forward_gen(self, x, src_lens, src_mask, max_len, bos_idx, temperature):
+        enc_x = self.encoder(x, src_lens, src_mask)
         out_tokens = torch.full([x.shape[0], 1], bos_idx, dtype=torch.int64, device=x.device)
         out_lens = [1] * x.shape[0]
         out_probas = None
-        for _ in range(max_len):
-            dec_probas = self.decoder(out_tokens, out_lens, enc_x, None)
+        for i in range(max_len):
+            tgt_mask = torch.ones((1, i + 1, i + 1), dtype=torch.bool)
+            dec_probas = self.decoder(out_tokens, out_lens, enc_x, src_mask, tgt_mask)
             if out_probas is None:
                 out_probas = dec_probas
             else:
