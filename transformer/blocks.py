@@ -5,8 +5,8 @@ from torch.nn.utils.rnn import pad_sequence
 
 
 class LinearLayer(nn.Module):
-    def __init__(self, in_dimension, out_dimension, weights_initialization="he", bias_initialization="zeros",
-                 use_bias=True, scaling_factor=1, freeze=False):
+    def __init__(self, in_dimension, out_dimension, weights_initialization="glorot_uniform",
+                 bias_initialization="zeros", use_bias=True, scaling_factor=1, freeze=False):
         super().__init__()
 
         self.in_dimension = in_dimension
@@ -16,8 +16,9 @@ class LinearLayer(nn.Module):
         self.freeze = freeze
 
         # initialize weights
-        assert weights_initialization in ["he", "glorot", "normal", "ones"]
-        if weights_initialization == "glorot":
+        assert weights_initialization in ["he", "glorot_normal", "normal", "ones", "glorot_uniform"]
+        std = 1
+        if weights_initialization == "glorot_normal":
             fan_avg = (self.in_dimension + self.out_dimension) / 2
             std = np.sqrt(1 / fan_avg)
         elif weights_initialization == "he":
@@ -27,6 +28,10 @@ class LinearLayer(nn.Module):
         weights = np.random.normal(0, std, [in_dimension, out_dimension]).astype(np.float32)
         if weights_initialization == "ones":
             weights = np.ones([in_dimension, out_dimension], dtype=np.float32)
+        elif weights_initialization == "glorot_uniform":
+            fan_avg = (self.in_dimension + self.out_dimension) / 2
+            r = np.sqrt(3 / fan_avg)
+            weights = np.random.uniform(low=-r, high=r, size=[in_dimension, out_dimension]).astype(np.float32)
 
         self.weights = torch.from_numpy(weights)
         self.weights = nn.Parameter(self.weights)
@@ -62,6 +67,9 @@ class ScaledEmbedding(nn.Module):
             model_dim,
             padding_idx=padding_idx
         )
+        for p in self.embedding.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
 
         self.model_dim = torch.tensor(self.model_dim, dtype=torch.float32)
 
@@ -70,7 +78,7 @@ class ScaledEmbedding(nn.Module):
 
 
 class PositionWiseFeedForward(nn.Module):
-    def __init__(self, in_dim, mid_dim, out_dim, weights_initialization="he",
+    def __init__(self, in_dim, mid_dim, out_dim, weights_initialization="glorot_uniform",
                  bias_initialization="zeros"):
         super().__init__()
         self.layer1 = LinearLayer(
@@ -135,13 +143,11 @@ class ScaledDotProductAttention(nn.Module):
             inf_mask = torch.zeros(_big_mul_scaled.shape, device=query.device)
             inf_mask[:, :timestep + 1, :timestep + 1] = 1
             _big_mul_scaled = _big_mul_scaled.detach().masked_fill(inf_mask == 0, -1e9)
-        # todo: is this masking proper?
         # _big_mul_scaled[pad_mask_mul == 0] = torch.Tensor([float("-inf")])
         _big_mul_scaled = _big_mul_scaled.detach().masked_fill(pad_mask_mul == 0, -1e9)
-        _big_mul_softed = nn.functional.softmax(_big_mul_scaled, dim=-1)  # todo: this softmax works as intended?
-        if timestep is not None:  # todo: is this ok? otherwise we've got nans
+        _big_mul_softed = nn.functional.softmax(_big_mul_scaled, dim=-1)
+        if timestep is not None:
             _big_mul_softed[:, timestep + 1:, :] = 0.
-        # todo: is this masking proper?
         # _big_mul_softed[pad_mask_mul == 0] = 0.
         _big_mul_softed = _big_mul_softed.detach().masked_fill(pad_mask_mul == 0, 0.)
         _big_tokens = torch.bmm(_big_mul_softed, V)
@@ -184,7 +190,7 @@ class ScaledDotProductAttention(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, num_attention_heads, model_dim, dropout, weights_initialization="he"):
+    def __init__(self, num_attention_heads, model_dim, dropout, weights_initialization="glorot_uniform"):
         super().__init__()
         assert num_attention_heads in [1, 2, 4, 8]
         self.num_attention_heads = num_attention_heads
@@ -252,7 +258,7 @@ class PositionalEncodings:
 
 
 class LayerNormalization(nn.Module):
-    def __init__(self, model_dim, eps=1e-8):
+    def __init__(self, model_dim, eps=1e-6):
         super().__init__()
         self.model_dim = model_dim
         self.eps = eps
