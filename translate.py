@@ -1,6 +1,8 @@
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
+from data import create_masks
+
 
 class DeEnTranslator:
     def __init__(self, model, set_generator, temperature):
@@ -23,9 +25,11 @@ class DeEnTranslator:
         de_tokens_lens = [x.shape[0] for x in de_tokens]
         de_tokens = torch.transpose(pad_sequence(de_tokens, padding_value=self.set_gen.pad_idx), 1, 0)
 
+        src_mask, _ = create_masks(de_tokens, None, 1)
+
         with torch.no_grad():
             en_tokens, _ = self.model.forward_gen(
-                de_tokens, de_tokens_lens, max_out_len, self.set_gen.bos_idx, self.temperature
+                de_tokens, de_tokens_lens, src_mask, max_out_len, self.set_gen.bos_idx, self.temperature
             )
 
         return parse_tokens(en_tokens, self.set_gen.vocab_transform[self._tgt_lang])
