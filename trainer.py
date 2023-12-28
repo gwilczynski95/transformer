@@ -53,6 +53,11 @@ class Trainer:
             self.writer = SummaryWriter(
                 Path(self.model_dir, "logs")
             )
+        else:
+            print("Init weights")
+            for p in self.model.parameters():
+                if p.dim() > 1:
+                    nn.init.xavier_uniform_(p)
 
         outer = tqdm.tqdm(total=epochs - start_epoch, desc="Epoch", position=0)
         train_status = tqdm.tqdm(total=0, position=1, bar_format="{desc}")
