@@ -476,6 +476,7 @@ class Decoder(nn.Module):
                     dropout_rate=dropout_rate
                 ).to(self.device)
             )
+        self.out_linear = LinearLayer(model_dim, embed_size)
         self.dec_blocks = nn.ModuleList(self.dec_blocks)
         self.positional_encoder = PositionalEncodings(model_dim, self.device)
         self.dropout_layer = nn.Dropout(p=dropout_rate).to(self.device)
@@ -499,7 +500,7 @@ class Decoder(nn.Module):
             x = dec_block(x, enc_x, tgt_mask, src_mask)
 
         # now do the linear layer but with embedding weights
-        x = torch.matmul(x, self.embed_layer.embedding.weight.T)
+        x = self.out_linear(x)
 
         # now softmax but probably it's better to do it outside the decoder
         return x
