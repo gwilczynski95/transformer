@@ -122,33 +122,27 @@ class PositionWiseFeedForward(nn.Module):
         return self.layer2(_out)
 
 
-class ScaledDotProductAttention(nn.Module):  # todo: test this
-    def __init__(self, inp_dim, keys_dim, values_dim, weights_initialization="he"):
+class ScaledDotProductAttention(nn.Module):
+    def __init__(self, dropout):
         super().__init__()
+        self.softmax = nn.Softmax(dim=-1)
+        self.dropout = nn.Dropout(p=dropout)
 
-        self.keys_dim = torch.tensor(keys_dim)
+    def forward(self, query, key, value, mask=None):
+        query_key = torch.matmul(
+            query,  # [BS, AH, NOW, DK]
+            key.transpose(-2, -1)  # [BS, AH, NOW, DK] -> [BS, AH, DK, NOW]
+        )  # [BS, AH, NOW, NOW]
+        query_key /= query.shape[-1]  # divide by DK
+        if mask is not None:
+            query_key = query_key.masked_fill(
+                mask == 0, -1e9
+            )
+        scores = self.softmax(query_key)
+        scores = self.dropout(scores)
+        return torch.matmul(scores, value)
 
-        self.layer_Q = LinearLayer(
-            inp_dim,
-            keys_dim,
-            weights_initialization=weights_initialization,
-            use_bias=False
-        )
-        self.layer_K = LinearLayer(
-            inp_dim,
-            keys_dim,
-            weights_initialization=weights_initialization,
-            use_bias=False
-        )
-        self.layer_V = LinearLayer(
-            inp_dim,
-            values_dim,
-            weights_initialization=weights_initialization,
-            use_bias=False
-        )
-        self.softmax = nn.Softmax()
-
-    def forward(self, query, key, value, timestep=None):
+    def legacy_forward_1(self, query, key, value, timestep=None):
         # inp [batch_size, num_of_tokens, inp_dim]
         query_pad_mask = torch.any(query, dim=2, keepdim=True)
         query_pad_mask = torch.broadcast_to(query_pad_mask, query.shape).float()
@@ -180,7 +174,7 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
         _big_tokens = torch.bmm(_big_mul_softed, V)
         return _big_tokens
 
-    def legacy_forward(self, query, key, value):
+    def legacy_forward_2(self, query, key, value):
         # inp [batch_size, num_of_tokens, inp_dim]
         out = []
         big_Q = self.layer_Q(query)
@@ -217,78 +211,45 @@ class ScaledDotProductAttention(nn.Module):  # todo: test this
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, num_attention_heads, model_dim, weights_initialization="he"):
+    def __init__(self, num_attention_heads, model_dim, dropout, weights_initialization="he"):
         super().__init__()
         assert num_attention_heads in [1, 2, 4, 8]
         self.num_attention_heads = num_attention_heads
         self.model_dim = model_dim
+        self.dim_per_head = int(self.model_dim / self.num_attention_heads)
         self.head_dim = model_dim // num_attention_heads
+        self.dropout = dropout
 
-        self.linear = LinearLayer(
-            model_dim, model_dim, weights_initialization=weights_initialization, use_bias=False
+        self.linears = nn.ModuleList([
+            LinearLayer(
+                model_dim, model_dim, weights_initialization=weights_initialization, use_bias=False
+            ) for _ in range(4)
+        ])
+
+        self.attn = ScaledDotProductAttention(self.dropout)
+
+    def forward(self, query, key, value, mask=None):
+        if mask is not None:
+            # to handle attention heads dimension
+            # NOW = number of words
+            # src_mask: [BS, 1, NOW] -> [BS, 1, 1, NOW]
+            # tgt_mask: [BS, NOW, NOW] -> [BS, 1, NOW, NOW]
+            mask = mask.unsqueeze(1)
+
+        # out of every layer is [BS, NOW, MD]
+        # after view and transpose [BS, NOW, MD] -> [BS, AH, NOW, DK]
+        _bs = query.shape[0]
+        query, key, value = [
+            layer(x).view(_bs, -1, self.num_attention_heads, self.head_dim).transpose(1, 2)
+            for layer, x in zip(self.linears[:-1], (query, key, value))
+        ]
+
+        x = self.attn(query, key, value, mask)
+        # [BS, AH, NOW, DK] -> [BS, NOW, MD]
+        x = x.transpose(1, 2).contiguous().view(
+            _bs, -1, self.num_attention_heads * self.head_dim
         )
-
-        attention_heads = []
-        for head_idx in range(num_attention_heads):
-            attention_heads.append(
-                ScaledDotProductAttention(
-                    self.head_dim, self.head_dim, self.head_dim, weights_initialization
-                )
-            )
-        self.attention_heads = nn.ModuleList(attention_heads)
-
-    def forward(self, x):
-        attention_out = []
-        for head_idx, attention_head in enumerate(self.attention_heads):  # todo: do it in parallel
-            attention_out.append(
-                attention_head(
-                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
-                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
-                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)]
-                )
-            )
-        attention_out = torch.cat(attention_out, dim=2)
-        out = self.linear(attention_out)
-        return out
-
-
-class DecoderMultiHeadAttention(MultiHeadAttention):
-    def __init__(self, num_attention_heads, model_dim, weights_initialization="he"):
-        super().__init__(num_attention_heads, model_dim, weights_initialization)
-
-    def forward(self, x, keys, values):
-        attention_out = []
-        for head_idx, attention_head in enumerate(self.attention_heads):
-            attention_out.append(
-                attention_head(
-                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
-                    keys[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
-                    values[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)]
-                )
-            )
-        attention_out = torch.cat(attention_out, dim=2)
-        out = self.linear(attention_out)
-        return out
-
-
-class MaskedMultiHeadAttention(MultiHeadAttention):
-    def __init__(self, num_attention_heads, model_dim, weights_initialization="he"):
-        super().__init__(num_attention_heads, model_dim, weights_initialization)
-
-    def forward(self, x, timestep):
-        attention_out = []
-        for head_idx, attention_head in enumerate(self.attention_heads):
-            attention_out.append(
-                attention_head(
-                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
-                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
-                    x[:, :, self.head_dim * head_idx: self.head_dim * (head_idx + 1)],
-                    timestep=timestep
-                )
-            )
-        attention_out = torch.cat(attention_out, dim=2)
-        out = self.linear(attention_out)
-        return out
+        return self.linears[-1](x)
 
 
 class PositionalEncodings:
@@ -323,7 +284,6 @@ class LayerNormalization(nn.Module):
         self.model_dim = model_dim
         self.eps = eps
 
-        # todo: change to rand?
         self.gamma = nn.Parameter(torch.ones(self.model_dim, dtype=torch.float32))
         self.beta = nn.Parameter(torch.zeros(self.model_dim, dtype=torch.float32))
 
@@ -361,6 +321,7 @@ class EncoderBlock(nn.Module):
         self.mha = MultiHeadAttention(
             num_attention_heads=attention_heads,
             model_dim=model_dim,
+            dropout=dropout_rate
         )
         self.pwff = PositionWiseFeedForward(
             in_dim=model_dim,
@@ -368,9 +329,9 @@ class EncoderBlock(nn.Module):
             out_dim=model_dim
         )
 
-    def forward(self, x):
+    def forward(self, x, src_mask):
         x_skip = x
-        x = self.mha(x)
+        x = self.mha(x, x, x, src_mask)
         x = self.dropout_layer(x)
         x = x + x_skip
 
@@ -428,7 +389,7 @@ class Encoder(nn.Module):  # TODO: WHY I HAVE THOSE SINUSOIDAL PATTERNS
         self.positional_encoder = PositionalEncodings(model_dim, self.device)
         self.dropout_layer = nn.Dropout(p=dropout_rate).to(self.device)
 
-    def forward(self, x, src_lens):
+    def forward(self, x, src_lens, src_mask):
         """
         :param x: Input tokens to Encoder layer
         :param src_lens: Len of every input sentence (for Positional Encoding's sake)
@@ -442,7 +403,7 @@ class Encoder(nn.Module):  # TODO: WHY I HAVE THOSE SINUSOIDAL PATTERNS
         x = self.dropout_layer(x)
 
         for enc_block in self.enc_blocks:
-            x = enc_block(x)
+            x = enc_block(x, src_mask)
 
         return x
 
@@ -467,39 +428,39 @@ class DecoderBlock(nn.Module):
         self.ln2 = LayerNormalization(model_dim)
         self.ln3 = LayerNormalization(model_dim)
 
-        self.m_mha = MaskedMultiHeadAttention(
-            num_attention_heads=attention_heads,
-            model_dim=model_dim,
+        self.d_mha = MultiHeadAttention(
+            self.attention_heads,
+            self.model_dim,
+            self.dropout_rate
         )
-        self.d_mha = DecoderMultiHeadAttention(
-            num_attention_heads=attention_heads,
-            model_dim=model_dim
+
+        self.mha = MultiHeadAttention(
+            self.attention_heads,
+            self.model_dim,
+            self.dropout_rate
         )
+
         self.pwff = PositionWiseFeedForward(
             in_dim=model_dim,
             mid_dim=pwff_mid_dim,
             out_dim=model_dim
         )
 
-    def forward(self, x, enc_x, timestep):
+    def forward(self, x, enc_x, tgt_mask, src_mask):
         skip_x = x
 
         # add mask to skip_x
-        if timestep is not None:
-            skip_mask = torch.ones(skip_x.shape).to(x.device)
-            skip_mask[:, timestep + 1:, :] = 0.
-            skip_x = skip_x * skip_mask
-
-        x = self.m_mha(x, timestep)
+        x = self.d_mha(x, x, x, tgt_mask)
         x = self.dropout_layer(x)
         x = skip_x + x
         x = self.ln1(x)
 
         skip_x = x
-        x = self.d_mha(
+        x = self.mha(
             x,
             enc_x,
-            enc_x
+            enc_x,
+            src_mask
         )
         x = self.dropout_layer(x)
         x = skip_x + x
@@ -546,7 +507,7 @@ class Decoder(nn.Module):
         self.positional_encoder = PositionalEncodings(model_dim, self.device)
         self.dropout_layer = nn.Dropout(p=dropout_rate).to(self.device)
 
-    def forward(self, x, tgt_lens, enc_x, timestep):
+    def forward(self, x, tgt_lens, enc_x, src_mask, tgt_mask):
         """
         :param x: Input tokens to Decoder layer
         :param tgt_lens: Len of every input sentence (for Positionel Encoding's sake)
@@ -562,7 +523,7 @@ class Decoder(nn.Module):
         x = self.dropout_layer(x)
 
         for dec_block in self.dec_blocks:
-            x = dec_block.forward(x, enc_x, timestep)
+            x = dec_block(x, enc_x, tgt_mask, src_mask)
 
         # now do the linear layer but with embedding weights
         x = torch.matmul(x, self.embed_layer.embedding.weight.T)
@@ -608,18 +569,17 @@ class TransformerModel(nn.Module):
             device=self.device
         ).to(self.device)
 
-    def forward(self, x, y, src_lens, tgt_lens):
+    def forward(self, x, y, src_lens, tgt_lens, src_mask, tgt_mask):
         tgt_input_lens = [x - 1 for x in tgt_lens]
         max_tgt_len = y.shape[-1]
 
         out = []
-        enc_x = self.encoder(x, src_lens)
-        for timestep in range(max_tgt_len):
-            output = self.decoder(y, tgt_input_lens, enc_x, timestep)
-            out.append(output[:, timestep: timestep + 1, :])
-        return torch.cat(out, dim=1)
+        enc_x = self.encoder(x, src_lens, src_mask)  # todo: test this
+        out = self.decoder(y, tgt_lens, enc_x, src_mask, tgt_mask)
+        return out
 
     def forward_gen(self, x, src_lens, max_len, bos_idx, temperature):
+        # todo: rewrite this
         enc_x = self.encoder(x, src_lens)
         out_tokens = torch.full([x.shape[0], 1], bos_idx, dtype=torch.int64, device=x.device)
         out_lens = [1] * x.shape[0]
