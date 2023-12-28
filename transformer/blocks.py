@@ -364,6 +364,7 @@ class Encoder(nn.Module):  # TODO: WHY I HAVE THOSE SINUSOIDAL PATTERNS
                     dropout_rate=dropout_rate,
                 ).to(self.device)
             )
+        self.ln = LayerNormalization(model_dim)
         self.enc_blocks = nn.ModuleList(self.enc_blocks)
         self.positional_encoder = PositionalEncodings(model_dim, self.device)
         self.dropout_layer = nn.Dropout(p=dropout_rate).to(self.device)
@@ -379,6 +380,7 @@ class Encoder(nn.Module):  # TODO: WHY I HAVE THOSE SINUSOIDAL PATTERNS
         pos_encodings = torch.transpose(pad_sequence(pos_encodings, padding_value=0.), 1, 0)
 
         x = x + pos_encodings
+        x = self.ln(x)
         x = self.dropout_layer(x)
 
         for enc_block in self.enc_blocks:
@@ -482,6 +484,7 @@ class Decoder(nn.Module):
                     dropout_rate=dropout_rate
                 ).to(self.device)
             )
+        self.ln = LayerNormalization(model_dim)
         self.out_linear = LinearLayer(model_dim, embed_size)
         self.dec_blocks = nn.ModuleList(self.dec_blocks)
         self.positional_encoder = PositionalEncodings(model_dim, self.device)
@@ -500,6 +503,7 @@ class Decoder(nn.Module):
         pos_encodings = torch.transpose(pad_sequence(pos_encodings, padding_value=0.), 1, 0)
 
         x = x + pos_encodings
+        x = self.ln(x)
         x = self.dropout_layer(x)
 
         for dec_block in self.dec_blocks:
