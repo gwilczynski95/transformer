@@ -3,6 +3,8 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 
+from data import get_time_mask
+
 
 class LinearLayer(nn.Module):
     def __init__(self, in_dimension, out_dimension, weights_initialization="glorot_uniform",
@@ -565,7 +567,7 @@ class TransformerModel(nn.Module):
         out_lens = [1] * x.shape[0]
         out_probas = None
         for i in range(max_len):
-            tgt_mask = torch.ones((1, i + 1, i + 1), dtype=torch.bool).to(self.device)
+            tgt_mask = get_time_mask(i + 1).bool().to(self.device)
             dec_probas = self.decoder(out_tokens, out_lens, enc_x, src_mask, tgt_mask)
             if out_probas is None:
                 out_probas = dec_probas
