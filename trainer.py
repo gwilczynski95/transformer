@@ -109,11 +109,13 @@ class Trainer:
             for src, tgt, src_lens, tgt_lens in data_loader:
                 src = src.to(self.device).T
                 tgt = tgt.to(self.device).T
+                tgt_input = tgt[:, :-1]
                 tgt = tgt[:, 1:]
 
-                src_mask, _ = create_masks(src, None, self.set_loader.pad_idx)
+                src_mask, tgt_mask = create_masks(src, tgt_input, self.set_loader.pad_idx)
 
-                out_tokens, out_probas = self.model.forward_gen(
+                out_probas = self.model(src, tgt_input, src_lens, tgt_lens, src_mask, tgt_mask)
+                out_tokens, _ = self.model.forward_gen(
                     src, src_lens, src_mask, max(tgt_lens) - 1, self.set_loader.bos_idx, temperature
                 )
                 output_texts = parse_tokens(out_tokens, self.set_loader.vocab_transform["en"])
