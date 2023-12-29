@@ -38,7 +38,7 @@ class Trainer:
     def train(self, epochs, optimizer_params, checkpoint_path=None):
         # todo: add proper optimizer
         criterion = nn.CrossEntropyLoss(ignore_index=self.set_loader.pad_idx)
-        optimizer = optim.Adam(self.model.parameters(), lr=optimizer_params["lr"])
+        optimizer = optim.Adam(self.model.parameters(), lr=optimizer_params["lr"], betas=(0.9, 0.98), eps=1e-9)
         print("Start training")
 
         start_epoch = 0
