@@ -15,14 +15,12 @@ model_hyperparams = {
 
 training_hyperparams = {
     "epochs": int(105000 / (_multi_30k_train_samples / batch_size)),
-    # "optimizer_params": {
-    #     "warmup_steps": 4000,
-    #     "beta_1": 0.9,
-    #     "beta_2": 0.98,
-    #     "eps": 1e-9
-    # },
     "optimizer_params": {
-        "lr": 1e-3
+        "lr": 1,
+        "betas": (0.9, 0.98),
+        "eps": 1e-9,
+        "warmup_steps": 4000,
+        "d_model": model_hyperparams["model_dim"],
     },
     "checkpoint_path": checkpoint_path
 }

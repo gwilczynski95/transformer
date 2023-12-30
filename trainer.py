@@ -11,6 +11,7 @@ from nltk.translate.meteor_score import meteor_score
 
 import config
 from data import create_masks
+from transformer.utils import get_optimizer_and_scheduler
 from translate import parse_tokens
 
 
@@ -36,8 +37,11 @@ class Trainer:
         )
 
     def train(self, epochs, optimizer_params, checkpoint_path=None):
-        # todo: add proper optimizer
         criterion = nn.CrossEntropyLoss(ignore_index=self.set_loader.pad_idx)
+        optimizer, scheduler = get_optimizer_and_scheduler({
+            "model": self.model,
+            **config.training_hyperparams["optimizer_params"]
+        })
         optimizer = optim.Adam(self.model.parameters(), lr=optimizer_params["lr"], betas=(0.9, 0.98), eps=1e-9)
         print("Start training")
 
@@ -47,6 +51,7 @@ class Trainer:
             checkpoint = torch.load(checkpoint_path)
             self.model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             start_epoch = checkpoint['epoch']
 
             self.model_dir = Path(checkpoint_path).parent.parent
@@ -75,6 +80,7 @@ class Trainer:
                 loss = criterion(outputs.reshape(-1, outputs.shape[-1]), tgt.reshape(-1))
                 loss.backward()
                 optimizer.step()
+                scheduler.step()
 
                 running_loss += loss.item()
                 _iters += 1
@@ -82,12 +88,13 @@ class Trainer:
             avg_loss = running_loss / _iters
             train_status.set_description_str(f"Epoch {epoch}, train loss: {avg_loss}")
 
+            self.log_lr(epoch, "Train", optimizer)
             self.log_metrics(epoch, "Train", avg_loss)
 
             # Save checkpoint
             save_path = Path(self.model_dir, "checkpoints", f"step_{epoch + 1}")
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            self.save_checkpoint(epoch, save_path, optimizer)
+            self.save_checkpoint(epoch, save_path, optimizer, scheduler)
 
             # Evaluate on validation set if available
             if self.val_loader is not None:
@@ -133,12 +140,13 @@ class Trainer:
 
         return running_loss, bleu_res, meteor_average
 
-    def save_checkpoint(self, epoch, path, optimizer):
+    def save_checkpoint(self, epoch, path, optimizer, scheduler):
         if path:
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': self.model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
             }, f'{path}_epoch_{epoch}.pt')
 
     @staticmethod
@@ -156,6 +164,9 @@ class Trainer:
             self.writer.add_scalar(f'{phase}/BLEU', bleu, epoch)
         if meteor is not None:
             self.writer.add_scalar(f'{phase}/METEOR', meteor, epoch)
+
+    def log_lr(self, epoch, phase, optimizer):
+        self.writer.add_scalar(f"{phase}/LR", optimizer.param_groups[0]["lr"], epoch)
 
     def save_model(self, path):
         torch.save(self.model.state_dict(), path)
