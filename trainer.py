@@ -42,7 +42,6 @@ class Trainer:
             "model": self.model,
             **config.training_hyperparams["optimizer_params"]
         })
-        optimizer = optim.Adam(self.model.parameters(), lr=optimizer_params["lr"], betas=(0.9, 0.98), eps=1e-9)
         print("Start training")
 
         start_epoch = 0
