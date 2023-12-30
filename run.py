@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 
 import config
 from data import DeEnSetGenerator
@@ -24,6 +25,10 @@ def main():
         config.experiment_name
     )
     model_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(
+        Path(config.__file__),
+        Path(model_dir, "config.py")
+    )
     trainer = Trainer(
         model_dir,
         model,
