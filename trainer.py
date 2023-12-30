@@ -38,7 +38,7 @@ class Trainer:
 
     def train(self, epochs, optimizer_params, checkpoint_path=None):
         criterion = nn.CrossEntropyLoss(ignore_index=self.set_loader.pad_idx)
-        optimizer, scheduler = get_optimizer_and_scheduler({
+        optimizer, scheduler = get_optimizer_and_scheduler(**{
             "model": self.model,
             **config.training_hyperparams["optimizer_params"]
         })
