@@ -1,4 +1,4 @@
-experiment_name = "adam_test_1"
+experiment_name = ""
 experiment_parent_path = ""
 checkpoint_path = None
 batch_size = 64
