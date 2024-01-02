@@ -35,7 +35,10 @@ def main():
         loader,
         device='cuda'
     )
-    trainer.train(**config.training_hyperparams)
+    trainer.train(
+        config.training_hyperparams["epochs"],
+        config.training_hyperparams["checkpoint_path"],
+    )
 
 
 if __name__ == "__main__":

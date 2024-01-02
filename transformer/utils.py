@@ -23,3 +23,18 @@ def get_optimizer_and_scheduler(model, d_model, warmup_steps, lr, betas, eps):
         )
     )
     return optimizer, scheduler
+
+
+class CategoricalCrossEntropy:
+    def __init__(self, smoothing_factor, num_classes, ignore_index):
+        self.smoothing_factor = smoothing_factor
+        self.num_classes = num_classes
+        self.ignore_index = ignore_index
+        self._criterion = torch.nn.CrossEntropyLoss(reduction="none")
+
+    def __call__(self, output, target):
+        oh_tgt = torch.nn.functional.one_hot(target, self.num_classes)
+        smoothed_tgt = oh_tgt * (1 - self.smoothing_factor) + self.smoothing_factor / self.num_classes
+        loss = self._criterion(output, smoothed_tgt)
+        loss = loss[target != self.ignore_index].mean()
+        return loss

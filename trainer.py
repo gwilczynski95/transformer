@@ -11,7 +11,7 @@ from nltk.translate.meteor_score import meteor_score
 
 import config
 from data import create_masks
-from transformer.utils import get_optimizer_and_scheduler
+from transformer.utils import get_optimizer_and_scheduler, CategoricalCrossEntropy
 from translate import parse_tokens
 
 
@@ -36,8 +36,12 @@ class Trainer:
             Path(model_dir, "logs")
         )
 
-    def train(self, epochs, optimizer_params, checkpoint_path=None):
-        criterion = nn.CrossEntropyLoss(ignore_index=self.set_loader.pad_idx)
+    def train(self, epochs, checkpoint_path=None):
+        criterion = CategoricalCrossEntropy(
+            smoothing_factor=config.training_hyperparams["loss"]["smoothing_factor"],
+            num_classes=self.model.decoder.out_linear.weights.shape[-1],  # size of the vocab
+            ignore_index=self.set_loader.pad_idx
+        )
         optimizer, scheduler = get_optimizer_and_scheduler(**{
             "model": self.model,
             **config.training_hyperparams["optimizer_params"]

@@ -22,5 +22,8 @@ training_hyperparams = {
         "warmup_steps": 4000,
         "d_model": model_hyperparams["model_dim"],
     },
+    "loss": {
+        "smoothing_factor": 0.1
+    },
     "checkpoint_path": checkpoint_path
 }
