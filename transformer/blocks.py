@@ -123,7 +123,7 @@ class ScaledDotProductAttention(nn.Module):
             )
         scores = self.softmax(query_key)
         scores = self.dropout(scores)
-        return torch.matmul(scores, value)
+        return torch.matmul(scores, value), scores
 
     def legacy_forward_1(self, query, key, value, timestep=None):
         # inp [batch_size, num_of_tokens, inp_dim]
@@ -208,6 +208,7 @@ class MultiHeadAttention(nn.Module):
         ])
 
         self.attn = ScaledDotProductAttention(self.dropout)
+        self.attn_val = None
 
     def forward(self, query, key, value, mask=None):
         if mask is not None:
@@ -225,7 +226,7 @@ class MultiHeadAttention(nn.Module):
             for layer, x in zip(self.linears[:-1], (query, key, value))
         ]
 
-        x = self.attn(query, key, value, mask)
+        x, self.attn_val = self.attn(query, key, value, mask)
         # [BS, AH, NOW, DK] -> [BS, NOW, MD]
         x = x.transpose(1, 2).contiguous().view(
             _bs, -1, self.num_attention_heads * self.head_dim
@@ -328,7 +329,7 @@ class EncoderBlock(nn.Module):
         return x
 
 
-class Encoder(nn.Module):  # TODO: WHY I HAVE THOSE SINUSOIDAL PATTERNS
+class Encoder(nn.Module):
     def __init__(self, embed_size, padding_idx, encoder_blocks=6, model_dim=512, attention_heads=8, pwff_mid_dim=2048,
                  dropout_rate=0.1, device=None):
         """
