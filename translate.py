@@ -1,3 +1,6 @@
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
@@ -55,8 +58,7 @@ def parse_tokens(tokens, vocab_transform, bos_symbol="<bos>", eos_symbol="<eos>"
     return out
 
 
-def _load_model_and_set(path_to_model):
-    import config
+def load_model_and_set(path_to_model, config):
     from data import DeEnSetGenerator
     from transformer.blocks import TransformerModel
 
@@ -77,7 +79,9 @@ def _load_model_and_set(path_to_model):
 def main():
     path_to_model = ""
     temperature = 1.
-    model, dataloader = _load_model_and_set(path_to_model)
+    path_to_config = Path(Path(path_to_model).parent.parent, "config.py")
+    config = SourceFileLoader("config", str(path_to_config)).load_module()
+    model, dataloader = load_model_and_set(path_to_model, config)
     translator = DeEnTranslator(
         model,
         dataloader,
